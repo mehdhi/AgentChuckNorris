@@ -4,3 +4,4 @@ dist/
 .DS_Store
 .chucknorris/
 .chucknorris-notify-test/
+.claude/scheduled_tasks.lock

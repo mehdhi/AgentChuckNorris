@@ -1,5 +1,7 @@
 # Usage Guide
 
+> Starting from an empty repo? Read the [Greenfield Walkthrough](GREENFIELD-WALKTHROUGH.md) first — a real executed run (phone book app) showing exactly what happens at each phase and what it costs.
+
 ## Prerequisites
 
 - Node.js ≥ 20 (global `fetch` required)

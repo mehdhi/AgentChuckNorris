@@ -9,6 +9,7 @@ chucknorris run --target /path/to/your/repo
 
 ## Docs
 
+- **[Greenfield Walkthrough](docs/GREENFIELD-WALKTHROUGH.md)** — a real, executed end-to-end run: empty repo → working phone book CLI with 57 passing tests, $5.62, phase-by-phase
 - **[Usage Guide](docs/USAGE.md)** — install, notification setup, running a project, responding to pauses, command reference, troubleshooting
 - **[Development Environment](docs/DEVELOPMENT.md)** — project layout, testing, architecture notes for contributors, how to extend
 - **[Design & Roadmap](docs/DESIGN.md)** — the idea, why context is cleared between stories, why goal-checking is a separate session, known limitations, future implementation ideas
