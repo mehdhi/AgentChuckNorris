@@ -43,7 +43,7 @@ export interface QueryOptions {
   maxTurns: number;
   permissionMode: string;
   settingSources: string[];
-  systemPrompt: { type: 'preset'; preset: 'claude_code' };
+  systemPrompt: { type: 'preset'; preset: 'claude_code'; append?: string };
   allowedTools?: string[];
   abortController?: AbortController;
 }

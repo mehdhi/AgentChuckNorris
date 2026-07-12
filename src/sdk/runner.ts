@@ -5,6 +5,8 @@ export interface RunnerDeps {
   queryFn: QueryFn;
   logger: Logger;
   abortController?: AbortController;
+  /** Optional caveman/style text appended to the preset system prompt for every session. */
+  systemPromptAppend?: string;
 }
 
 function truncate(s: string, n = 160): string {
@@ -34,7 +36,11 @@ export async function runSession(spec: SessionSpec, deps: RunnerDeps): Promise<S
         maxTurns: spec.maxTurns,
         permissionMode: 'bypassPermissions',
         settingSources: ['project'],
-        systemPrompt: { type: 'preset', preset: 'claude_code' },
+        systemPrompt: {
+          type: 'preset',
+          preset: 'claude_code',
+          ...(deps.systemPromptAppend ? { append: deps.systemPromptAppend } : {}),
+        },
         ...(spec.allowedTools ? { allowedTools: spec.allowedTools } : {}),
         ...(deps.abortController ? { abortController: deps.abortController } : {}),
       },

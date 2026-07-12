@@ -8,9 +8,10 @@ import { fetchLatestOffset, telegramSource, type TelegramOffsetStore } from './a
 import type { AckSource } from './ack/types.js';
 import { detectBmad } from './bmad/detect.js';
 import { renderStatus } from './cli/statusView.js';
-import { runWizard } from './cli/wizard.js';
+import { firstRunSetup, runWizard } from './cli/wizard.js';
+import { cavemanAppend, CavemanLevel } from './config/caveman.js';
 import { ALL_HAIKU_MODEL_MAP, STATE_DIR } from './config/defaults.js';
-import { loadGlobalConfig } from './config/load.js';
+import { globalConfigExists, loadGlobalConfig } from './config/load.js';
 import type { GlobalConfig } from './config/schema.js';
 import { runEngine } from './orchestrator/engine.js';
 import { RunAborted, type OrchestratorDeps } from './orchestrator/sessionHelpers.js';
@@ -31,9 +32,10 @@ import { runSession } from './sdk/runner.js';
 const USAGE = `ChuckNorrisAgent — BMAD dev-loop orchestrator
 
 Usage:
-  chucknorris run    [--target <path>] [--dry-run] [--all-haiku]
+  chucknorris run    [--target <path>] [--dry-run] [--all-haiku] [--caveman <off|lite|full|ultra>]
   chucknorris resume [--target <path>] [--dry-run]
   chucknorris status [--target <path>]
+  chucknorris setup  (re-run first-time global config)
   chucknorris notify-test
   chucknorris scratch [--target <path>] [--model <model>]  (SDK smoke test)
 `;
@@ -44,12 +46,19 @@ async function main(): Promise<void> {
     options: {
       target: { type: 'string' },
       model: { type: 'string' },
+      caveman: { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       'all-haiku': { type: 'boolean', default: false },
     },
   });
   const command = positionals[0] ?? 'run';
-  const global = await loadGlobalConfig();
+  let global = await loadGlobalConfig();
+
+  // First run (or explicit `setup`): capture durable global config once.
+  if (command === 'setup' || (command === 'run' && !(await globalConfigExists()))) {
+    global = await firstRunSetup(global);
+    if (command === 'setup') return;
+  }
 
   switch (command) {
     case 'run':
@@ -68,7 +77,24 @@ async function main(): Promise<void> {
   }
 }
 
-type Flags = { target?: string | undefined; model?: string | undefined; 'dry-run'?: boolean; 'all-haiku'?: boolean };
+type Flags = {
+  target?: string | undefined;
+  model?: string | undefined;
+  caveman?: string | undefined;
+  'dry-run'?: boolean;
+  'all-haiku'?: boolean;
+};
+
+/** Parse the --caveman flag, or undefined when absent (wizard choice then wins). */
+function cavemanFlag(flags: Flags): CavemanLevel | undefined {
+  if (!flags.caveman) return undefined;
+  const parsed = CavemanLevel.safeParse(flags.caveman);
+  if (!parsed.success) {
+    console.error(`--caveman must be off|lite|full|ultra, got "${flags.caveman}"`);
+    process.exit(1);
+  }
+  return parsed.data;
+}
 
 async function cmdRun(global: GlobalConfig, flags: Flags): Promise<void> {
   const wizard = await runWizard(global, flags.target);
@@ -86,6 +112,7 @@ async function cmdRun(global: GlobalConfig, flags: Flags): Promise<void> {
     problemStatement: wizard.problemStatement,
     overallGoal: wizard.overallGoal,
     modelMap: flags['all-haiku'] ? ALL_HAIKU_MODEL_MAP : wizard.modelMap,
+    caveman: cavemanFlag(flags) ?? wizard.caveman,
     maxRetries: wizard.maxRetries,
     maxBudgetUsd: wizard.maxBudgetUsd,
     enabledSteps: wizard.enabledSteps,
@@ -141,6 +168,8 @@ async function execute(initial: RunState, global: GlobalConfig, flags: Flags): P
   if (flags['dry-run']) logger.warn('DRY RUN — no real model calls, target must be pre-seeded');
 
   const bmad = await detectBmad(initial.targetRepo);
+  const append = cavemanAppend(initial.caveman);
+  if (append) logger.info(`caveman mode: ${initial.caveman}`);
   const deps: OrchestratorDeps = {
     queryFn,
     logger,
@@ -149,6 +178,7 @@ async function execute(initial: RunState, global: GlobalConfig, flags: Flags): P
     persist,
     abort,
     bmadOutputFolder: bmad.outputFolder,
+    ...(append ? { systemPromptAppend: append } : {}),
   };
 
   process.on('SIGINT', () => {

@@ -19,19 +19,32 @@ npm link           # optional — puts `chucknorris` on PATH
 
 Without `npm link`, run everything as `node dist/index.js <command>` instead of `chucknorris <command>`.
 
-## One-time: notification config
+## First run: global config
 
-Secrets live outside the target repo, in `~/.config/chucknorris/config.json`:
+The first time you `chucknorris run` (before any config file exists), a one-time setup wizard captures the durable, cross-project settings and writes them to `~/.config/chucknorris/config.json`. Re-run it anytime with:
+
+```bash
+chucknorris setup
+```
+
+It asks for:
+
+- **Caveman output style** — how terse the agent is throughout development: `off` (normal prose, default), `lite` (trim filler, keep sentences), `full` (classic terse caveman), `ultra` (maximally terse). This appends to every orchestrated session's system prompt. Code, commit messages, JSON verdicts, and safety/security text are always exempted, so brevity never costs correctness.
+- **Notification channels** — ntfy topic, Telegram bot token + chat id.
+- **Optional global model overrides** — durable per-role model defaults (per-run overrides still available in the run wizard).
+
+The file is plain JSON — hand-edit it later:
 
 ```json
 {
+  "caveman": "full",
   "ntfyTopic": "your-secret-topic-name",
   "telegramBotToken": "123456:ABC-your-bot-token",
   "telegramChatId": "your-numeric-chat-id"
 }
 ```
 
-All fields optional — omit a channel to disable it. Console output and (on macOS) desktop banners are always on regardless of this file. Env vars override the file: `CHUCKNORRIS_NTFY_TOPIC`, `CHUCKNORRIS_TELEGRAM_BOT_TOKEN`, `CHUCKNORRIS_TELEGRAM_CHAT_ID`.
+All fields optional — omit a channel to disable it. Console output and (on macOS) desktop banners are always on regardless of this file. Env vars override the file: `CHUCKNORRIS_NTFY_TOPIC`, `CHUCKNORRIS_TELEGRAM_BOT_TOKEN`, `CHUCKNORRIS_TELEGRAM_CHAT_ID`, `CHUCKNORRIS_CAVEMAN`. Per run, `--caveman <off|lite|full|ultra>` overrides the configured style.
 
 **Getting a Telegram bot token/chat id**: message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token. Then message your new bot once, and hit `https://api.telegram.org/bot<token>/getUpdates` in a browser — your chat id is in the response.
 
@@ -57,7 +70,8 @@ The wizard walks through:
 4. **Overall development goal** — checked informationally at the very end of the run
 5. **Optional phases** — brainstorming, product brief, UX/UI design, implementation-readiness check. PRD, architecture, epics/stories, sprint planning, and the dev loop always run
 6. **Model mapping** — accept the defaults or override per role
-7. **Retry limit and budget cap** — how many auto-retries per story before pausing, and an optional USD ceiling for the whole run
+7. **Caveman output style** — per-run terseness (`off`/`lite`/`full`/`ultra`), defaulting to your global config. `--caveman <level>` skips this prompt
+8. **Retry limit and budget cap** — how many auto-retries per story before pausing, and an optional USD ceiling for the whole run
 
 After the wizard, the run starts immediately and streams progress to the console (and your log file).
 
@@ -113,9 +127,10 @@ chucknorris run --target test/fixtures/sample-target --dry-run
 ## Command reference
 
 ```
-chucknorris run    [--target <path>] [--dry-run] [--all-haiku]
+chucknorris run    [--target <path>] [--dry-run] [--all-haiku] [--caveman <off|lite|full|ultra>]
 chucknorris resume [--target <path>] [--dry-run]
 chucknorris status [--target <path>]
+chucknorris setup                                         # re-run first-time global config
 chucknorris notify-test
 chucknorris scratch [--target <path>] [--model <model>]   # SDK connectivity smoke test
 ```

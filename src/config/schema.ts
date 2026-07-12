@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CavemanLevel } from './caveman.js';
 
 export const ModelRole = z.enum(['planning', 'grunt', 'coding', 'review']);
 export type ModelRole = z.infer<typeof ModelRole>;
@@ -45,5 +46,7 @@ export const GlobalConfig = z.object({
   telegramBotToken: z.string().optional(),
   telegramChatId: z.string().optional(),
   modelMap: ModelMap.partial().optional(),
+  /** Output style for orchestrated sessions. Set once at first run; omitted = 'off'. */
+  caveman: CavemanLevel.optional(),
 });
 export type GlobalConfig = z.infer<typeof GlobalConfig>;
