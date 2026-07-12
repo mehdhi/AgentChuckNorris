@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ChuckNorrisAgent — unattended BMAD dev-loop orchestrator</title>
+<meta name="description" content="Point it at a repo and a problem statement. It drives BMAD's brainstorm → PRD → architecture → epics → per-story dev loop to shipped, goal-verified stories — switching Claude models per phase, pinging your phone only when it needs a decision." />
+<meta property="og:title" content="ChuckNorrisAgent" />
+<meta property="og:description" content="Unattended BMAD-METHOD v6 dev-loop orchestrator with per-phase model switching and phone-in-the-loop acks." />
+<meta property="og:type" content="website" />
+<style>
+  :root {
+    --bg: #0b0e14;
+    --bg-soft: #11151f;
+    --panel: #151a26;
+    --border: #232a3a;
+    --fg: #d7dce6;
+    --muted: #8a93a6;
+    --accent: #7ee787;
+    --accent-2: #f0b429;
+    --accent-3: #6cb6ff;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(126,231,135,.08), transparent 60%),
+      radial-gradient(900px 500px at 0% 0%, rgba(108,182,255,.07), transparent 55%),
+      var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-3); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+
+  /* nav */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(8px);
+    background: rgba(11,14,20,.72);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+  .brand { color: var(--fg); font-weight: 700; letter-spacing: .3px; }
+  .brand .dot { color: var(--accent); }
+  .nav-links a { color: var(--muted); margin-left: 18px; font-size: 14px; }
+  .nav-links a:hover { color: var(--fg); text-decoration: none; }
+
+  /* hero */
+  header { padding: 80px 0 40px; }
+  .tag {
+    display: inline-block; font-size: 12px; color: var(--accent);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 12px; margin-bottom: 22px; background: var(--bg-soft);
+  }
+  h1 { font-size: clamp(34px, 6vw, 58px); line-height: 1.05; margin: 0 0 18px; letter-spacing: -1px; }
+  h1 .grad {
+    background: linear-gradient(90deg, var(--accent), var(--accent-3));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lede { font-size: clamp(16px, 2.4vw, 20px); color: var(--muted); max-width: 720px; }
+
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .btn.primary { background: var(--accent); color: #06210b; border-color: var(--accent); }
+  .btn.primary:hover { text-decoration: none; filter: brightness(1.08); }
+  .btn.ghost { color: var(--fg); background: var(--bg-soft); }
+  .btn.ghost:hover { text-decoration: none; border-color: var(--muted); }
+
+  /* terminal install */
+  .term {
+    margin-top: 34px; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--bg-soft); overflow: hidden;
+  }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .term-bar .c { width: 11px; height: 11px; border-radius: 50%; }
+  .c.r { background: #ff5f56; } .c.y { background: #ffbd2e; } .c.g { background: #27c93f; }
+  .term-bar .name { margin-left: 8px; color: var(--muted); font-size: 12px; }
+  .term-body { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; }
+  .term-body code { color: var(--fg); font-size: 14px; white-space: pre-wrap; }
+  .term-body code .p { color: var(--accent); }
+  .copy {
+    cursor: pointer; border: 1px solid var(--border); background: var(--panel);
+    color: var(--muted); border-radius: 6px; padding: 6px 10px; font-family: var(--mono); font-size: 12px;
+  }
+  .copy:hover { color: var(--fg); border-color: var(--muted); }
+
+  /* sections */
+  section { padding: 54px 0; border-top: 1px solid var(--border); }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 2px; color: var(--accent-2); margin: 0 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 26px; max-width: 720px; }
+
+  /* feature grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card h3 { margin: 0 0 8px; font-size: 15px; color: var(--fg); }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .card .ic { font-size: 20px; margin-bottom: 12px; }
+
+  /* pipeline */
+  .pipe { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .stage {
+    border: 1px solid var(--border); background: var(--bg-soft);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; color: var(--fg);
+  }
+  .stage.opt { color: var(--muted); border-style: dashed; }
+  .sep { color: var(--accent); font-weight: 700; }
+
+  /* table */
+  .tbl { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .tbl th, .tbl td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .tbl th { background: var(--bg-soft); color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+  .tbl td:last-child code { color: var(--accent); }
+  .tbl tr:last-child td { border-bottom: none; }
+  .role { color: var(--accent-3); font-weight: 600; }
+
+  /* code block */
+  pre {
+    background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; overflow-x: auto; font-size: 13.5px; color: var(--fg); margin: 0;
+  }
+  pre .cmt { color: var(--muted); }
+  pre .p { color: var(--accent); }
+
+  /* caveman callout */
+  .caveman {
+    background: linear-gradient(180deg, rgba(240,180,41,.06), transparent), var(--panel);
+    border: 1px solid var(--border); border-radius: 14px; padding: 26px;
+  }
+  .caveman .lv { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .lv .pill { border: 1px solid var(--border); background: var(--bg-soft); border-radius: 999px; padding: 5px 14px; font-size: 13px; color: var(--muted); }
+  .lv .pill b { color: var(--accent-2); }
+
+  /* stat */
+  .stat { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 16px; }
+  .stat .n { font-size: 30px; color: var(--accent); font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: 13px; }
+
+  footer { border-top: 1px solid var(--border); padding: 40px 0 70px; color: var(--muted); font-size: 13px; }
+  footer .links a { margin-right: 18px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <span class="brand">chucknorris<span class="dot">.</span>agent</span>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="https://github.com/mehdhi/AgentChuckNorris">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <span class="tag">BMAD-METHOD v6 · Claude Agent SDK</span>
+    <h1>Unattended <span class="grad">BMAD dev-loop</span><br />orchestrator.</h1>
+    <p class="lede">
+      Point it at a repo and a problem statement. It drives BMAD's own workflows —
+      brainstorm → PRD → UX → architecture → epics/stories → per-story dev loop —
+      through to shipped, goal-verified stories. It switches Claude models per phase and
+      pings your phone only when it genuinely needs a decision.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#quickstart">Get started</a>
+      <a class="btn ghost" href="https://github.com/mehdhi/AgentChuckNorris">★ View on GitHub</a>
+    </div>
+
+    <div class="term">
+      <div class="term-bar">
+        <span class="c r"></span><span class="c y"></span><span class="c g"></span>
+        <span class="name">bash</span>
+      </div>
+      <div class="term-body">
+        <code id="install"><span class="p">$</span> npm install &amp;&amp; npm run build &amp;&amp; npm link
+<span class="p">$</span> chucknorris run --target /path/to/your/repo</code>
+        <button class="copy" onclick="copyInstall(this)">copy</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Why it's different</h2>
+    <p class="sub">Every BMAD phase runs as its own fresh Agent SDK session — no session is ever resumed across phases or stories. All cross-session context travels through documents.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ic">🧠</div>
+        <h3>Per-phase model switching</h3>
+        <p>Planning gets a strong model's judgment; bookkeeping gets a cheap one; coding gets a code-tuned model; review gets a skeptical, separate pass.</p>
+      </div>
+      <div class="card">
+        <div class="ic">🧱</div>
+        <h3>Context cleared between stories</h3>
+        <p>Bounded cost regardless of project size. Documents — BMAD artifacts plus a managed tracking block — are the interface between steps, not chat history.</p>
+      </div>
+      <div class="card">
+        <div class="ic">🔒</div>
+        <h3>Fail-closed goal verification</h3>
+        <p>A separate review session diffs against a baseline commit and checks acceptance criteria against the actual code. Unparseable verdict = fail, never a silent ship.</p>
+      </div>
+      <div class="card">
+        <div class="ic">📱</div>
+        <h3>Phone in the loop</h3>
+        <p>Console, desktop, and ntfy fan-out; Telegram is bidirectional. Reply <code>/retry</code>, <code>/skip</code>, or free-text guidance from your phone — no server to run.</p>
+      </div>
+      <div class="card">
+        <div class="ic">💾</div>
+        <h3>Crash-safe & resumable</h3>
+        <p>State persists atomically after every step. <code>chucknorris resume</code> picks up cleanly after a crash or <code>Ctrl-C</code>.</p>
+      </div>
+      <div class="card">
+        <div class="ic">🪓</div>
+        <h3>Caveman output style</h3>
+        <p>Optional terse mode compresses model chatter across the whole run. Code, commits, JSON verdicts, and safety text stay exact — brevity never costs correctness.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pipeline">
+  <div class="wrap">
+    <h2>The pipeline</h2>
+    <p class="sub">Dashed stages are optional and toggled in the first-run wizard. The rest always run.</p>
+    <div class="pipe">
+      <span class="stage opt">brainstorm</span><span class="sep">›</span>
+      <span class="stage opt">product brief</span><span class="sep">›</span>
+      <span class="stage">PRD</span><span class="sep">›</span>
+      <span class="stage opt">UX</span><span class="sep">›</span>
+      <span class="stage">architecture</span><span class="sep">›</span>
+      <span class="stage">epics / stories</span><span class="sep">›</span>
+      <span class="stage opt">readiness</span><span class="sep">›</span>
+      <span class="stage">sprint planning</span><span class="sep">›</span>
+      <span class="stage">dev loop</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Model map</h2>
+    <p class="sub">Each phase declares which role it uses. Defaults below — override any per role, or globally at first run.</p>
+    <table class="tbl">
+      <thead><tr><th>Role</th><th>Used for</th><th>Default model</th></tr></thead>
+      <tbody>
+        <tr><td class="role">planning</td><td>brainstorm, brief, PRD, UX, architecture, epics/stories, create-story</td><td><code>claude-opus-4-8</code></td></tr>
+        <tr><td class="role">grunt</td><td>readiness, sprint planning, goal extraction, retrospectives</td><td><code>claude-haiku-4-5</code></td></tr>
+        <tr><td class="role">coding</td><td>dev-story implementation</td><td><code>claude-sonnet-5</code></td></tr>
+        <tr><td class="role">review</td><td>code review + goal verification</td><td><code>claude-opus-4-8</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Output style</h2>
+    <div class="caveman">
+      <h3 style="margin:0 0 8px;font-size:17px;">🪓 Caveman mode</h3>
+      <p style="margin:0;color:var(--muted);">
+        Configured once at first run (and overridable per run with <code>--caveman</code>), it appends a terseness
+        instruction to every orchestrated session — cutting the fluff that most session cost is spent on. Source code,
+        commit messages, structured JSON verdicts, and security/irreversible-action text are always exempted.
+      </p>
+      <div class="lv">
+        <span class="pill"><b>off</b> — normal prose</span>
+        <span class="pill"><b>lite</b> — trim filler</span>
+        <span class="pill"><b>full</b> — classic terse</span>
+        <span class="pill"><b>ultra</b> — maximally terse</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <h2>Quickstart</h2>
+    <p class="sub">No network, no API spend to validate. Real runs need Claude access.</p>
+    <pre><span class="cmt"># install</span>
+<span class="p">$</span> npm install &amp;&amp; npm run build &amp;&amp; npm link
+
+<span class="cmt"># first run — one-time global config (notifications, caveman style, models)</span>
+<span class="p">$</span> chucknorris run --target /path/to/your/repo
+
+<span class="cmt"># verify the notification round-trip before a long unattended run</span>
+<span class="p">$</span> chucknorris notify-test
+
+<span class="cmt"># resume after a crash or Ctrl-C</span>
+<span class="p">$</span> chucknorris resume --target /path/to/your/repo
+
+<span class="cmt"># validate the codebase (35+ unit + e2e tests, no network, no spend)</span>
+<span class="p">$</span> npx tsc --noEmit &amp;&amp; npm test</pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Proof of work</h2>
+    <p class="sub">A real, executed end-to-end run: empty repo → working phone-book CLI, phase by phase.</p>
+    <div class="stat">
+      <div><div class="n">57</div><div class="l">passing tests, generated</div></div>
+      <div><div class="n">$5.62</div><div class="l">total model cost</div></div>
+      <div><div class="n">0</div><div class="l">manual edits to the code</div></div>
+    </div>
+    <p style="margin-top:22px;"><a href="https://github.com/mehdhi/AgentChuckNorris/blob/main/docs/GREENFIELD-WALKTHROUGH.md">Read the full greenfield walkthrough →</a></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/mehdhi/AgentChuckNorris">GitHub</a>
+      <a href="https://github.com/mehdhi/AgentChuckNorris/blob/main/docs/USAGE.md">Usage</a>
+      <a href="https://github.com/mehdhi/AgentChuckNorris/blob/main/docs/DESIGN.md">Design</a>
+      <a href="https://github.com/mehdhi/AgentChuckNorris/blob/main/docs/DEVELOPMENT.md">Development</a>
+    </div>
+    <p style="margin-top:16px;">MIT licensed · Built on BMAD-METHOD v6 and the Claude Agent SDK.</p>
+  </div>
+</footer>
+
+<script>
+  function copyInstall(btn) {
+    var text = document.getElementById('install').innerText.replace(/^\$ /gm, '');
+    navigator.clipboard.writeText(text).then(function () {
+      var old = btn.textContent;
+      btn.textContent = 'copied ✓';
+      setTimeout(function () { btn.textContent = old; }, 1400);
+    });
+  }
+</script>
+</body>
+</html>
