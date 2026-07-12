@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CavemanLevel } from '../config/caveman.js';
 import { ModelMap } from '../config/schema.js';
 
 export const STEP_IDS = [
@@ -67,6 +68,8 @@ export const RunState = z.object({
   problemStatement: z.string(),
   overallGoal: z.string(),
   modelMap: ModelMap,
+  /** Output style for this run's sessions. Defaulted so pre-caveman state files still load. */
+  caveman: CavemanLevel.default('off'),
   maxRetries: z.number().int(),
   maxBudgetUsd: z.number().nullable(),
   steps: z.array(StepState),
@@ -91,6 +94,7 @@ export function newRunState(init: {
   problemStatement: string;
   overallGoal: string;
   modelMap: ModelMap;
+  caveman?: CavemanLevel;
   maxRetries: number;
   maxBudgetUsd?: number | undefined;
   enabledSteps: StepId[];
@@ -103,6 +107,7 @@ export function newRunState(init: {
     problemStatement: init.problemStatement,
     overallGoal: init.overallGoal,
     modelMap: init.modelMap,
+    caveman: init.caveman ?? 'off',
     maxRetries: init.maxRetries,
     maxBudgetUsd: init.maxBudgetUsd ?? null,
     steps: STEP_IDS.map((id) => ({

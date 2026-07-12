@@ -27,6 +27,8 @@ export interface OrchestratorDeps {
   persist: (s: RunState) => Promise<void>;
   abort: AbortController;
   bmadOutputFolder: string | null;
+  /** Caveman/style append for every session; undefined = plain preset prompt. */
+  systemPromptAppend?: string;
 }
 
 /** Run one session, account cost, persist, enforce the budget guard. */
@@ -39,6 +41,7 @@ export async function runTrackedSession(
     queryFn: deps.queryFn,
     logger: deps.logger,
     abortController: deps.abort,
+    ...(deps.systemPromptAppend ? { systemPromptAppend: deps.systemPromptAppend } : {}),
   });
   let next = addSessionCost(state, session.costUsd);
   await deps.persist(next);

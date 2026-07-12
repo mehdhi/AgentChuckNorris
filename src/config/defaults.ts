@@ -1,4 +1,7 @@
+import type { CavemanLevel } from './caveman.js';
 import type { ModelMap, ModelRole } from './schema.js';
+
+export const DEFAULT_CAVEMAN: CavemanLevel = 'off';
 
 export const DEFAULT_MODEL_MAP: ModelMap = {
   planning: 'claude-opus-4-8',

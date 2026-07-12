@@ -155,6 +155,7 @@ async function processStory(state: RunState, key: string, deps: OrchestratorDeps
       queryFn: deps.queryFn,
       logger: deps.logger,
       abortController: deps.abort,
+      ...(deps.systemPromptAppend ? { systemPromptAppend: deps.systemPromptAppend } : {}),
     });
     state = addCheckCost(state, checkSession.costUsd);
     await deps.persist(state);
