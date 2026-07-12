@@ -1,3 +1,4 @@
+import { fetchWithRetry } from '../util/retryFetch.js';
 import type { Notification, Notifier } from './types.js';
 
 export function telegramNotifier(
@@ -9,7 +10,7 @@ export function telegramNotifier(
     name: 'telegram',
     async send(n: Notification): Promise<void> {
       const prefix = n.priority === 'action' ? '🚨 ' : '';
-      const res = await fetchFn(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      const res = await fetchWithRetry(fetchFn, `https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: chatId, text: `${prefix}${n.title}\n\n${n.body}` }),

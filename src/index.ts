@@ -4,7 +4,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { controlFileSource } from './ack/controlFile.js';
 import { waitForAck } from './ack/listener.js';
-import { telegramSource, type TelegramOffsetStore } from './ack/telegramPoll.js';
+import { fetchLatestOffset, telegramSource, type TelegramOffsetStore } from './ack/telegramPoll.js';
 import type { AckSource } from './ack/types.js';
 import { detectBmad } from './bmad/detect.js';
 import { renderStatus } from './cli/statusView.js';
@@ -80,7 +80,7 @@ async function cmdRun(global: GlobalConfig, flags: Flags): Promise<void> {
     process.exit(1);
   }
 
-  const state = newRunState({
+  let state = newRunState({
     runId: randomUUID(),
     targetRepo: wizard.targetRepo,
     problemStatement: wizard.problemStatement,
@@ -90,6 +90,11 @@ async function cmdRun(global: GlobalConfig, flags: Flags): Promise<void> {
     maxBudgetUsd: wizard.maxBudgetUsd,
     enabledSteps: wizard.enabledSteps,
   });
+  if (global.telegramBotToken) {
+    // Otherwise offset 0 means "since bot creation" — the first real pause
+    // would replay setup chatter (e.g. the "hi" used to discover chat id).
+    state = setTelegramOffset(state, await fetchLatestOffset(global.telegramBotToken));
+  }
   await saveState(state);
   await execute(state, global, flags);
 }
@@ -213,7 +218,7 @@ async function cmdNotifyTest(global: GlobalConfig): Promise<void> {
 
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 60_000);
-  let offset = 0;
+  let offset = global.telegramBotToken ? await fetchLatestOffset(global.telegramBotToken) : 0;
   const sources: AckSource[] = [controlFileSource(process.cwd())];
   if (global.telegramBotToken && global.telegramChatId) {
     sources.push(
@@ -227,7 +232,13 @@ async function cmdNotifyTest(global: GlobalConfig): Promise<void> {
   }
   try {
     const ack = await waitForAck(sources, logger, abort.signal);
-    logger.info(`ack round trip OK: ${ack.kind} via ${ack.source}`);
+    // waitForAck resolves gracefully (not throws) when the 60s timer fires the
+    // outer abort — that's a timeout, not a reply, and must not be reported as success.
+    if (ack.source === 'signal') {
+      logger.warn('no ack received in 60s — send path works, reply path unverified');
+    } else {
+      logger.info(`ack round trip OK: ${ack.kind} via ${ack.source}`);
+    }
   } catch {
     logger.warn('no ack received in 60s — send path works, reply path unverified');
   } finally {

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { controlFileSource } from '../../src/ack/controlFile.js';
 import { waitForAck } from '../../src/ack/listener.js';
-import { telegramSource } from '../../src/ack/telegramPoll.js';
+import { fetchLatestOffset, telegramSource } from '../../src/ack/telegramPoll.js';
 import { parseAckText } from '../../src/ack/types.js';
 import { consoleLogger } from '../../src/util/logger.js';
 
@@ -38,6 +38,28 @@ describe('controlFileSource', () => {
     const cmd = await waitForAck([src], consoleLogger());
     expect(cmd.kind).toBe('skip');
     expect(await fs.readFile(path.join(controlDir, 'control'), 'utf8')).toBe('');
+  });
+});
+
+describe('fetchLatestOffset', () => {
+  it('returns max update_id + 1 when backlog exists (skips stale setup messages)', async () => {
+    const fetchFn = (async () => ({
+      ok: true,
+      json: async () => ({ ok: true, result: [{ update_id: 10 }, { update_id: 15 }, { update_id: 12 }] }),
+    })) as unknown as typeof fetch;
+    expect(await fetchLatestOffset('tok', fetchFn)).toBe(16);
+  });
+
+  it('returns 0 when there is no backlog', async () => {
+    const fetchFn = (async () => ({ ok: true, json: async () => ({ ok: true, result: [] }) })) as unknown as typeof fetch;
+    expect(await fetchLatestOffset('tok', fetchFn)).toBe(0);
+  });
+
+  it('fails safe to 0 on HTTP error or network failure', async () => {
+    const failing = (async () => ({ ok: false })) as unknown as typeof fetch;
+    expect(await fetchLatestOffset('tok', failing)).toBe(0);
+    const throwing = (async () => { throw new Error('down'); }) as unknown as typeof fetch;
+    expect(await fetchLatestOffset('tok', throwing)).toBe(0);
   });
 });
 

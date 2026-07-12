@@ -1,10 +1,11 @@
+import { fetchWithRetry } from '../util/retryFetch.js';
 import type { Notification, Notifier } from './types.js';
 
 export function ntfyNotifier(topic: string, fetchFn: typeof fetch = fetch): Notifier {
   return {
     name: 'ntfy',
     async send(n: Notification): Promise<void> {
-      const res = await fetchFn(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+      const res = await fetchWithRetry(fetchFn, `https://ntfy.sh/${encodeURIComponent(topic)}`, {
         method: 'POST',
         headers: {
           Title: n.title,

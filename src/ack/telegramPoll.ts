@@ -1,3 +1,4 @@
+import { fetchWithRetry } from '../util/retryFetch.js';
 import { parseAckText, type AckCommand, type AckSource } from './types.js';
 
 interface TelegramUpdate {
@@ -9,6 +10,27 @@ export interface TelegramOffsetStore {
   get(): number;
   /** Persisted so a reply is never double-consumed across crashes. */
   set(offset: number): Promise<void>;
+}
+
+/**
+ * A run's telegramOffset always starts at 0, which to the Telegram API means
+ * "everything since the bot's creation" — replaying setup messages (e.g. the
+ * initial "hi" used to discover the chat id) as if they were a live reply to
+ * the run's first real pause. Call this once before a fresh run starts (or
+ * before an ephemeral ack wait) to fast-forward past whatever is already
+ * sitting in the update queue.
+ */
+export async function fetchLatestOffset(botToken: string, fetchFn: typeof fetch = fetch): Promise<number> {
+  try {
+    const res = await fetchWithRetry(fetchFn, `https://api.telegram.org/bot${botToken}/getUpdates?timeout=0`, {});
+    if (!res.ok) return 0;
+    const body = (await res.json()) as { ok: boolean; result?: TelegramUpdate[] };
+    const updates = body.result ?? [];
+    if (updates.length === 0) return 0;
+    return Math.max(...updates.map((u) => u.update_id)) + 1;
+  } catch {
+    return 0; // best-effort priming; worst case a fresh run replays existing backlog once
+  }
 }
 
 /**
