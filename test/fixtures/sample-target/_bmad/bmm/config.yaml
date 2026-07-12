@@ -1,0 +1,3 @@
+project_name: sample-target
+output_folder: '{project-root}/docs'
+user_name: Tester

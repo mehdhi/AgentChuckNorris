@@ -1,0 +1,266 @@
+#!/usr/bin/env node
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { parseArgs } from 'node:util';
+import { controlFileSource } from './ack/controlFile.js';
+import { waitForAck } from './ack/listener.js';
+import { telegramSource, type TelegramOffsetStore } from './ack/telegramPoll.js';
+import type { AckSource } from './ack/types.js';
+import { detectBmad } from './bmad/detect.js';
+import { renderStatus } from './cli/statusView.js';
+import { runWizard } from './cli/wizard.js';
+import { ALL_HAIKU_MODEL_MAP, STATE_DIR } from './config/defaults.js';
+import { loadGlobalConfig } from './config/load.js';
+import type { GlobalConfig } from './config/schema.js';
+import { runEngine } from './orchestrator/engine.js';
+import { RunAborted, type OrchestratorDeps } from './orchestrator/sessionHelpers.js';
+import { realQueryFn } from './sdk/runner.js';
+import { autoResponderQueryFn } from './sdk/scripted.js';
+import type { QueryFn } from './sdk/types.js';
+import { loadState, saveState } from './state/stateFile.js';
+import { newRunState, setTelegramOffset, type RunState } from './state/types.js';
+import { consoleNotifier } from './notify/console.js';
+import { desktopNotifier } from './notify/desktop.js';
+import { multiNotifier } from './notify/multi.js';
+import { ntfyNotifier } from './notify/ntfy.js';
+import { telegramNotifier } from './notify/telegram.js';
+import type { Notifier } from './notify/types.js';
+import { createLogger, type Logger } from './util/logger.js';
+import { runSession } from './sdk/runner.js';
+
+const USAGE = `ChuckNorrisAgent — BMAD dev-loop orchestrator
+
+Usage:
+  chucknorris run    [--target <path>] [--dry-run] [--all-haiku]
+  chucknorris resume [--target <path>] [--dry-run]
+  chucknorris status [--target <path>]
+  chucknorris notify-test
+  chucknorris scratch [--target <path>] [--model <model>]  (SDK smoke test)
+`;
+
+async function main(): Promise<void> {
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: {
+      target: { type: 'string' },
+      model: { type: 'string' },
+      'dry-run': { type: 'boolean', default: false },
+      'all-haiku': { type: 'boolean', default: false },
+    },
+  });
+  const command = positionals[0] ?? 'run';
+  const global = await loadGlobalConfig();
+
+  switch (command) {
+    case 'run':
+      return cmdRun(global, values);
+    case 'resume':
+      return cmdResume(global, values);
+    case 'status':
+      return cmdStatus(values);
+    case 'notify-test':
+      return cmdNotifyTest(global);
+    case 'scratch':
+      return cmdScratch(values);
+    default:
+      console.log(USAGE);
+      process.exit(command === 'help' ? 0 : 1);
+  }
+}
+
+type Flags = { target?: string | undefined; model?: string | undefined; 'dry-run'?: boolean; 'all-haiku'?: boolean };
+
+async function cmdRun(global: GlobalConfig, flags: Flags): Promise<void> {
+  const wizard = await runWizard(global, flags.target);
+
+  const existing = await loadState(wizard.targetRepo);
+  if (existing) {
+    console.log(renderStatus(existing));
+    console.error('\nA run already exists for this target. Use `chucknorris resume` or delete .chucknorris/state.json.');
+    process.exit(1);
+  }
+
+  const state = newRunState({
+    runId: randomUUID(),
+    targetRepo: wizard.targetRepo,
+    problemStatement: wizard.problemStatement,
+    overallGoal: wizard.overallGoal,
+    modelMap: flags['all-haiku'] ? ALL_HAIKU_MODEL_MAP : wizard.modelMap,
+    maxRetries: wizard.maxRetries,
+    maxBudgetUsd: wizard.maxBudgetUsd,
+    enabledSteps: wizard.enabledSteps,
+  });
+  await saveState(state);
+  await execute(state, global, flags);
+}
+
+async function cmdResume(global: GlobalConfig, flags: Flags): Promise<void> {
+  const target = path.resolve(flags.target ?? process.cwd());
+  const state = await loadState(target);
+  if (!state) {
+    console.error(`no run found at ${target}/${STATE_DIR}/state.json`);
+    process.exit(1);
+  }
+  console.log(renderStatus(state));
+  console.log('\nResuming…\n');
+  await execute(state, global, flags);
+}
+
+async function cmdStatus(flags: Flags): Promise<void> {
+  const target = path.resolve(flags.target ?? process.cwd());
+  const state = await loadState(target);
+  if (!state) {
+    console.error(`no run found at ${target}/${STATE_DIR}/state.json`);
+    process.exit(1);
+  }
+  console.log(renderStatus(state));
+}
+
+async function execute(initial: RunState, global: GlobalConfig, flags: Flags): Promise<void> {
+  const logger = createLogger(path.join(initial.targetRepo, STATE_DIR, 'logs'), initial.runId);
+  const abort = new AbortController();
+
+  // Shared mutable ref: the telegram poller bumps the offset while the engine
+  // holds its own state copy, so persist() merges the freshest offset.
+  const ref = { current: initial };
+  const persist = async (s: RunState): Promise<void> => {
+    const merged = setTelegramOffset(s, Math.max(s.telegramOffset, ref.current.telegramOffset));
+    ref.current = merged;
+    await saveState(merged);
+  };
+
+  const notifier = buildNotifier(global, logger);
+  const ackSources = buildAckSources(initial.targetRepo, global, ref, persist);
+
+  const queryFn: QueryFn = flags['dry-run'] ? autoResponderQueryFn() : await realQueryFn();
+  if (flags['dry-run']) logger.warn('DRY RUN — no real model calls, target must be pre-seeded');
+
+  const bmad = await detectBmad(initial.targetRepo);
+  const deps: OrchestratorDeps = {
+    queryFn,
+    logger,
+    notifier,
+    ackSources,
+    persist,
+    abort,
+    bmadOutputFolder: bmad.outputFolder,
+  };
+
+  process.on('SIGINT', () => {
+    logger.warn('SIGINT — aborting (state is persisted; `chucknorris resume` to continue)');
+    abort.abort();
+  });
+
+  try {
+    const final = await runEngine(ref.current, deps);
+    console.log('\n' + renderStatus(final));
+  } catch (err) {
+    if (err instanceof RunAborted || abort.signal.aborted) {
+      logger.warn(`stopped: ${err instanceof Error ? err.message : String(err)} — resume with \`chucknorris resume --target ${initial.targetRepo}\``);
+      console.log('\n' + renderStatus(ref.current));
+      process.exitCode = 130;
+    } else {
+      logger.error(`fatal: ${String(err)}`);
+      await notifier.send({
+        title: 'run crashed',
+        body: `${String(err)}\n\nState persisted — \`chucknorris resume\` after fixing.`,
+        priority: 'action',
+      });
+      process.exitCode = 1;
+    }
+  } finally {
+    abort.abort();
+    await logger.close();
+  }
+}
+
+function buildNotifier(global: GlobalConfig, logger: Logger): Notifier {
+  const channels: Notifier[] = [consoleNotifier(logger)];
+  if (process.platform === 'darwin') channels.push(desktopNotifier());
+  if (global.ntfyTopic) channels.push(ntfyNotifier(global.ntfyTopic));
+  if (global.telegramBotToken && global.telegramChatId) {
+    channels.push(telegramNotifier(global.telegramBotToken, global.telegramChatId));
+  }
+  return multiNotifier(channels, logger);
+}
+
+function buildAckSources(
+  targetRepo: string,
+  global: GlobalConfig,
+  ref: { current: RunState },
+  persist: (s: RunState) => Promise<void>,
+): AckSource[] {
+  const sources: AckSource[] = [controlFileSource(targetRepo)];
+  if (global.telegramBotToken && global.telegramChatId) {
+    const offsets: TelegramOffsetStore = {
+      get: () => ref.current.telegramOffset,
+      set: (offset) => persist(setTelegramOffset(ref.current, offset)),
+    };
+    sources.push(telegramSource(global.telegramBotToken, global.telegramChatId, offsets));
+  }
+  return sources;
+}
+
+async function cmdNotifyTest(global: GlobalConfig): Promise<void> {
+  const logger = createLogger(path.join(process.cwd(), '.chucknorris-notify-test'), 'notify-test');
+  const notifier = buildNotifier(global, logger);
+  await notifier.send({
+    title: 'notify-test',
+    body: 'Round-trip test. Reply /go (Telegram) or `echo go > ./.chucknorris/control` within 60s.',
+    priority: 'action',
+  });
+  logger.info('notification sent on all channels — waiting up to 60s for an ack…');
+
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 60_000);
+  let offset = 0;
+  const sources: AckSource[] = [controlFileSource(process.cwd())];
+  if (global.telegramBotToken && global.telegramChatId) {
+    sources.push(
+      telegramSource(global.telegramBotToken, global.telegramChatId, {
+        get: () => offset,
+        set: async (o) => {
+          offset = o;
+        },
+      }),
+    );
+  }
+  try {
+    const ack = await waitForAck(sources, logger, abort.signal);
+    logger.info(`ack round trip OK: ${ack.kind} via ${ack.source}`);
+  } catch {
+    logger.warn('no ack received in 60s — send path works, reply path unverified');
+  } finally {
+    clearTimeout(timer);
+    await logger.close();
+  }
+}
+
+/** M2 smoke test: verifies model switching, settingSources, slash-command probe, cost capture. */
+async function cmdScratch(flags: Flags): Promise<void> {
+  const target = path.resolve(flags.target ?? process.cwd());
+  const logger = createLogger(path.join(target, STATE_DIR, 'logs'), 'scratch');
+  const queryFn = await realQueryFn();
+  const result = await runSession(
+    {
+      label: 'scratch',
+      model: flags.model ?? 'claude-haiku-4-5-20251001',
+      prompt: 'Reply with exactly: SCRATCH_OK. Then stop.',
+      cwd: target,
+      maxTurns: 3,
+      allowedTools: ['Read'],
+    },
+    { queryFn, logger },
+  );
+  logger.info(
+    `ok=${result.ok} model-run cost=$${result.costUsd.toFixed(4)} ` +
+      `slash-commands=${result.slashCommands.length} (bmad: ${result.slashCommands.filter((c) => c.includes('bmad')).length})`,
+  );
+  logger.info(`final text: ${result.finalText.slice(0, 200)}`);
+  await logger.close();
+}
+
+main().catch((err) => {
+  console.error(String(err));
+  process.exit(1);
+});
