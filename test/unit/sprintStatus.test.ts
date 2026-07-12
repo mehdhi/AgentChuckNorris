@@ -54,4 +54,36 @@ describe('parseSprintStatus', () => {
     const file = await writeYaml('just a string');
     expect(await parseSprintStatus(file)).toEqual([]);
   });
+
+  it('survives BMAD unquoted {project-root} template placeholders (real crash, greenfield run 2026-07-12)', async () => {
+    const file = await writeYaml(`# story_location: {project-root}/_bmad-output/implementation-artifacts
+generated: 2026-07-12
+project: phonebook
+story_location: {project-root}/_bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: backlog
+  1-1-project-setup-storage-layer: backlog
+  1-2-add-contact-command: backlog
+  epic-1-retrospective: optional
+`);
+    const entries = await parseSprintStatus(file);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ key: '1-1-project-setup-storage-layer', epic: 1, done: false });
+  });
+
+  it('line-level fallback recovers development_status when whole doc is unparseable', async () => {
+    const file = await writeYaml(`top: [unclosed
+other: {broken: {
+development_status:
+  1-1-x: done
+  # a comment inside
+  2-1-y: backlog
+outside: not-indented
+`);
+    const entries = await parseSprintStatus(file);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ key: '1-1-x', done: true });
+    expect(entries[1]).toMatchObject({ key: '2-1-y', done: false });
+  });
 });
