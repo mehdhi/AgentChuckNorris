@@ -50,7 +50,7 @@ chucknorris run --target /path/to/your/repo
 The wizard walks through:
 
 1. **Target repo** — confirms the path exists
-2. **BMAD install check** — if `_bmad/` is missing, offers to run `npx bmad-method@latest install` right there in your terminal (pick **core + bmm** modules, **Claude Code** as the tool)
+2. **BMAD install check** — if `_bmad/` is missing, offers to install it non-interactively (`--yes --modules core,bmm --tools claude-code`) right there in your terminal
 3. **Problem statement** — what you're building and why, one sentence minimum
 4. **Overall development goal** — checked informationally at the very end of the run
 5. **Optional phases** — brainstorming, product brief, UX/UI design, implementation-readiness check. PRD, architecture, epics/stories, sprint planning, and the dev loop always run

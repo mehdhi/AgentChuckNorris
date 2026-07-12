@@ -52,7 +52,7 @@ export async function runWizard(global: GlobalConfig, targetFlag?: string): Prom
   let bmad = await detectBmad(targetRepo);
   if (!bmad.installed) {
     const doInstall = await p.confirm({
-      message: 'BMAD not installed in target. Run `npx bmad-method@latest install` now? (pick core + bmm, tool: Claude Code)',
+      message: 'BMAD not installed in target. Install it now (non-interactive: core + bmm, tool: Claude Code)?',
     });
     bail(doInstall);
     if (doInstall) {
