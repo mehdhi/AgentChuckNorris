@@ -7,6 +7,8 @@ import {
   nextPendingStep,
   patchStory,
   recordStepResult,
+  reserveFeatureNumber,
+  setChainTip,
   setStepStatus,
   setWaiting,
   upsertStory,
@@ -39,6 +41,10 @@ const story: StoryState = {
   lastFailure: null,
   reviewDigest: null,
   operatorGuidance: null,
+  branch: null,
+  prBase: null,
+  prNumber: null,
+  prUrl: null,
 };
 
 describe('state reducers', () => {
@@ -75,6 +81,34 @@ describe('state reducers', () => {
     s = patchStory(s, story.key, { attempts: 1, status: 'in_progress' });
     expect(s.devLoop.stories[story.key]?.attempts).toBe(1);
     expect(() => patchStory(s, 'nope', {})).toThrow(/unknown story/);
+  });
+
+  it('stackedPrs defaults on; feature counter and chain tip advance separately', () => {
+    const s = base();
+    expect(s.stackedPrs).toBe(true);
+    expect(s.devLoop.featureSeq).toBe(0);
+    expect(s.devLoop.chainTipBranch).toBeNull();
+
+    const r1 = reserveFeatureNumber(s);
+    expect(r1.seq).toBe(1);
+    expect(r1.state.devLoop.featureSeq).toBe(1);
+    expect(r1.state.devLoop.chainTipBranch).toBeNull(); // reserving a number never moves the tip
+
+    const tipped = setChainTip(r1.state, 'feat/01-x');
+    expect(tipped.devLoop.chainTipBranch).toBe('feat/01-x');
+    expect(reserveFeatureNumber(tipped).seq).toBe(2); // monotonic
+  });
+
+  it('old state files without stacked-PR fields parse with defaults', () => {
+    const s = base() as unknown as Record<string, unknown>;
+    delete s['stackedPrs'];
+    const dl = s['devLoop'] as Record<string, unknown>;
+    delete dl['featureSeq'];
+    delete dl['chainTipBranch'];
+    const parsed = RunState.parse(JSON.parse(JSON.stringify(s)));
+    expect(parsed.stackedPrs).toBe(true);
+    expect(parsed.devLoop.featureSeq).toBe(0);
+    expect(parsed.devLoop.chainTipBranch).toBeNull();
   });
 
   it('cost accumulation + budget guard', () => {

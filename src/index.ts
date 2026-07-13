@@ -13,6 +13,8 @@ import { cavemanAppend, CavemanLevel } from './config/caveman.js';
 import { ALL_HAIKU_MODEL_MAP, STATE_DIR } from './config/defaults.js';
 import { globalConfigExists, loadGlobalConfig } from './config/load.js';
 import type { GlobalConfig } from './config/schema.js';
+import { gitHead, hasGitHubRemote } from './util/git.js';
+import { ghAvailable } from './util/github.js';
 import { runEngine } from './orchestrator/engine.js';
 import { RunAborted, type OrchestratorDeps } from './orchestrator/sessionHelpers.js';
 import { realQueryFn } from './sdk/runner.js';
@@ -47,6 +49,8 @@ async function main(): Promise<void> {
       target: { type: 'string' },
       model: { type: 'string' },
       caveman: { type: 'string' },
+      'stacked-prs': { type: 'boolean', default: false },
+      'no-stacked-prs': { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
       'all-haiku': { type: 'boolean', default: false },
     },
@@ -81,9 +85,18 @@ type Flags = {
   target?: string | undefined;
   model?: string | undefined;
   caveman?: string | undefined;
+  'stacked-prs'?: boolean;
+  'no-stacked-prs'?: boolean;
   'dry-run'?: boolean;
   'all-haiku'?: boolean;
 };
+
+/** Stacked-PR flag intent, or undefined when neither flag given (wizard choice then wins). */
+function stackedPrsFlag(flags: Flags): boolean | undefined {
+  if (flags['no-stacked-prs']) return false;
+  if (flags['stacked-prs']) return true;
+  return undefined;
+}
 
 /** Parse the --caveman flag, or undefined when absent (wizard choice then wins). */
 function cavemanFlag(flags: Flags): CavemanLevel | undefined {
@@ -113,6 +126,7 @@ async function cmdRun(global: GlobalConfig, flags: Flags): Promise<void> {
     overallGoal: wizard.overallGoal,
     modelMap: flags['all-haiku'] ? ALL_HAIKU_MODEL_MAP : wizard.modelMap,
     caveman: cavemanFlag(flags) ?? wizard.caveman,
+    stackedPrs: stackedPrsFlag(flags) ?? wizard.stackedPrs,
     maxRetries: wizard.maxRetries,
     maxBudgetUsd: wizard.maxBudgetUsd,
     enabledSteps: wizard.enabledSteps,
@@ -170,6 +184,7 @@ async function execute(initial: RunState, global: GlobalConfig, flags: Flags): P
   const bmad = await detectBmad(initial.targetRepo);
   const append = cavemanAppend(initial.caveman);
   if (append) logger.info(`caveman mode: ${initial.caveman}`);
+  const stackedPrs = await stackedPrsFeasible(initial, flags, logger);
   const deps: OrchestratorDeps = {
     queryFn,
     logger,
@@ -179,6 +194,7 @@ async function execute(initial: RunState, global: GlobalConfig, flags: Flags): P
     abort,
     bmadOutputFolder: bmad.outputFolder,
     ...(append ? { systemPromptAppend: append } : {}),
+    ...(stackedPrs ? { stackedPrs: true } : {}),
   };
 
   process.on('SIGINT', () => {
@@ -207,6 +223,26 @@ async function execute(initial: RunState, global: GlobalConfig, flags: Flags): P
     abort.abort();
     await logger.close();
   }
+}
+
+/**
+ * Stacked PRs need a real git repo with a GitHub remote and an authenticated
+ * `gh` CLI. Probe once; if anything is missing (or it's a dry run), log and run
+ * without per-story PRs rather than failing.
+ */
+async function stackedPrsFeasible(state: RunState, flags: Flags, logger: Logger): Promise<boolean> {
+  if (!state.stackedPrs || flags['dry-run']) return false;
+  const isRepo = (await gitHead(state.targetRepo)) !== null;
+  const ok = isRepo && (await hasGitHubRemote(state.targetRepo)) && (await ghAvailable(state.targetRepo));
+  if (ok) {
+    logger.info('stacked-PRs: on — per-story feat/NN branches + chained PRs');
+  } else {
+    logger.warn(
+      'stacked-PRs enabled but target lacks a git repo, GitHub remote, or gh CLI auth — ' +
+        'running without per-story PRs',
+    );
+  }
+  return ok;
 }
 
 function buildNotifier(global: GlobalConfig, logger: Logger): Notifier {

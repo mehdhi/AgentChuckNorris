@@ -29,6 +29,8 @@ export interface OrchestratorDeps {
   bmadOutputFolder: string | null;
   /** Caveman/style append for every session; undefined = plain preset prompt. */
   systemPromptAppend?: string;
+  /** When true (and the target has a GitHub remote + gh), open a stacked PR per story. */
+  stackedPrs?: boolean;
 }
 
 /** Run one session, account cost, persist, enforce the budget guard. */

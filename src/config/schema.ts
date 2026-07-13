@@ -48,5 +48,7 @@ export const GlobalConfig = z.object({
   modelMap: ModelMap.partial().optional(),
   /** Output style for orchestrated sessions. Set once at first run; omitted = 'off'. */
   caveman: CavemanLevel.optional(),
+  /** Open a numbered stacked PR per story during the dev loop. Omitted = on. */
+  stackedPrs: z.boolean().optional(),
 });
 export type GlobalConfig = z.infer<typeof GlobalConfig>;
