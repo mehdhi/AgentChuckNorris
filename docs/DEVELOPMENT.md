@@ -27,6 +27,11 @@ npx vitest run test/unit/storyDoc.test.ts
 npx vitest run -t "goal-check"
 ```
 
+## Contributing changes
+
+Features follow a numbered stacked-PR flow off `main` — see **[Git Workflow](GIT-WORKFLOW.md)**.
+In Claude Code, `/feature-start <slug>` and `/feature-pr` automate the branch/PR mechanics.
+
 ## Project layout
 
 ```

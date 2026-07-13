@@ -1,0 +1,102 @@
+# Git Workflow — numbered stacked PRs
+
+The base branch is **`main`**. Every feature gets its own numbered branch, raises a PR
+immediately, and the next feature **chains** off it so later work already contains earlier work.
+PRs are **stacked**: a chained PR targets its parent branch, and GitHub auto-retargets it to
+`main` when the parent merges. The number `NN` encodes merge order.
+
+> Two Claude Code commands automate the mechanics: `/feature-start <slug>` and `/feature-pr`.
+> This doc is the reference they follow — you can also run the git/gh commands by hand.
+
+## Branch & PR naming
+
+- Branch: `feat/NN-slug` — `NN` is a two-digit, zero-padded, monotonic number (`01`, `02`, …); `slug` is kebab-case.
+- PR title: `[NN] <human title>`.
+
+## Numbering
+
+The next number is:
+
+```
+max( NN across all local + remote feat/NN-* branches AND all open PR titles matching [NN] ) + 1
+```
+
+starting at `01`. Numbering never reuses a value, even after a feature merges.
+
+## Base selection when starting a feature
+
+- **Chain tip** = the highest-numbered feature branch that still has an open (unmerged) PR.
+- If a chain tip exists → branch **from it** (after `git fetch`); the new branch inherits its commits, so it won't conflict with the parent.
+- If nothing is outstanding (all features merged) → branch fresh from updated `origin/main`.
+
+## Lifecycle
+
+```bash
+# 1. Start (from chain tip if one is open, else origin/main)
+git fetch origin
+git switch -c feat/NN-slug <base>      # <base> = feat/(NN-1)-... or origin/main
+
+# 2. Implement + commit normally
+
+# 3. Raise the PR immediately
+git push -u origin feat/NN-slug
+gh pr create \
+  --base <parent-branch-or-main> \     # parent feat branch when chained, else main
+  --head feat/NN-slug \
+  --title "[NN] <human title>" \
+  --body  "<summary>
+
+Stacked on: #<parentPR>"               # omit this line when base is main
+
+# 4. Chain the next feature off the branch you just pushed
+git switch -c feat/(NN+1)-next-slug feat/NN-slug
+```
+
+## Worked example — two chained features
+
+```bash
+# Feature 01, from main
+git fetch origin
+git switch -c feat/01-add-cache origin/main
+#   …commit…
+git push -u origin feat/01-add-cache
+gh pr create --base main --head feat/01-add-cache --title "[01] Add cache"
+
+# Feature 02 chains off 01 (do NOT wait for #01 to merge)
+git switch -c feat/02-cache-metrics feat/01-add-cache
+#   …commit…  (already contains 01's work → no conflicts)
+git push -u origin feat/02-cache-metrics
+gh pr create --base feat/01-add-cache --head feat/02-cache-metrics \
+  --title "[02] Cache metrics" --body "Stacked on: #<PR of 01>"
+```
+
+PR `[02]` shows only its own diff because its base is `feat/01-add-cache`, not `main`.
+
+## Merge order & recovery (stacked-PR hazards)
+
+- **Merge the lowest `NN` first.** Merging out of order breaks the stack.
+- Enable **delete branch on merge** for the repo (or pass `--delete-branch`) so GitHub
+  **auto-retargets** each child PR to `main` when its parent merges.
+- **After a parent PR merges** (squash rewrites its SHAs), rebase each child onto main so its PR
+  shows only its own diff:
+
+  ```bash
+  git switch feat/NN-child
+  git fetch origin
+  git rebase origin/main              # drops the now-merged parent commits
+  git push --force-with-lease
+  ```
+
+- **Propagate review fixes made on a parent** down the chain:
+
+  ```bash
+  # fix + commit on feat/NN-parent, push
+  git switch feat/NN-child
+  git rebase feat/NN-parent
+  git push --force-with-lease
+  ```
+
+## Notes
+
+- The legacy `dev` branch is superseded by per-feature branches; it is left in place, not deleted.
+- Always rebase/force-push with `--force-with-lease`, never a bare `--force`.
