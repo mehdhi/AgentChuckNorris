@@ -28,7 +28,7 @@ export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
 /**
  * Load ~/.config/chucknorris/config.json then apply env overrides:
  * CHUCKNORRIS_NTFY_TOPIC, CHUCKNORRIS_TELEGRAM_BOT_TOKEN, CHUCKNORRIS_TELEGRAM_CHAT_ID,
- * CHUCKNORRIS_CAVEMAN (off|lite|full|ultra).
+ * CHUCKNORRIS_CAVEMAN (off|lite|full|ultra), CHUCKNORRIS_STACKED_PRS (true|false).
  */
 export async function loadGlobalConfig(): Promise<GlobalConfig> {
   let raw: GlobalConfig = {};
@@ -50,7 +50,14 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
       ? { telegramChatId: process.env['CHUCKNORRIS_TELEGRAM_CHAT_ID'] }
       : {}),
     ...cavemanEnvOverride(),
+    ...stackedPrsEnvOverride(),
   };
+}
+
+function stackedPrsEnvOverride(): { stackedPrs: boolean } | Record<string, never> {
+  const raw = process.env['CHUCKNORRIS_STACKED_PRS'];
+  if (raw === undefined || raw === '') return {};
+  return { stackedPrs: !/^(0|false|no|off)$/i.test(raw) };
 }
 
 function cavemanEnvOverride(): { caveman: CavemanLevel } | Record<string, never> {

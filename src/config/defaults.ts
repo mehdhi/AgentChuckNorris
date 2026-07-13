@@ -3,6 +3,9 @@ import type { ModelMap, ModelRole } from './schema.js';
 
 export const DEFAULT_CAVEMAN: CavemanLevel = 'off';
 
+/** Numbered stacked-PR-per-story dev-loop workflow is on unless opted out. */
+export const DEFAULT_STACKED_PRS = true;
+
 export const DEFAULT_MODEL_MAP: ModelMap = {
   planning: 'claude-opus-4-8',
   grunt: 'claude-haiku-4-5-20251001',

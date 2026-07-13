@@ -30,6 +30,7 @@ chucknorris setup
 It asks for:
 
 - **Caveman output style** — how terse the agent is throughout development: `off` (normal prose, default), `lite` (trim filler, keep sentences), `full` (classic terse caveman), `ultra` (maximally terse). This appends to every orchestrated session's system prompt. Code, commit messages, JSON verdicts, and safety/security text are always exempted, so brevity never costs correctness.
+- **Stacked PRs** — on by default. During the dev loop each story gets its own numbered `feat/NN-<story>` branch (chained off the previous story's branch), and a PR is opened for it when the story passes goal verification. Follows the [Git Workflow](GIT-WORKFLOW.md). Needs a GitHub remote + authenticated `gh` CLI in the target repo; if either is missing it auto-skips and the run proceeds without PRs. Opt out per run with `--no-stacked-prs`.
 - **Notification channels** — ntfy topic, Telegram bot token + chat id.
 - **Optional global model overrides** — durable per-role model defaults (per-run overrides still available in the run wizard).
 
@@ -38,13 +39,14 @@ The file is plain JSON — hand-edit it later:
 ```json
 {
   "caveman": "full",
+  "stackedPrs": true,
   "ntfyTopic": "your-secret-topic-name",
   "telegramBotToken": "123456:ABC-your-bot-token",
   "telegramChatId": "your-numeric-chat-id"
 }
 ```
 
-All fields optional — omit a channel to disable it. Console output and (on macOS) desktop banners are always on regardless of this file. Env vars override the file: `CHUCKNORRIS_NTFY_TOPIC`, `CHUCKNORRIS_TELEGRAM_BOT_TOKEN`, `CHUCKNORRIS_TELEGRAM_CHAT_ID`, `CHUCKNORRIS_CAVEMAN`. Per run, `--caveman <off|lite|full|ultra>` overrides the configured style.
+All fields optional — omit a channel to disable it. Console output and (on macOS) desktop banners are always on regardless of this file. Env vars override the file: `CHUCKNORRIS_NTFY_TOPIC`, `CHUCKNORRIS_TELEGRAM_BOT_TOKEN`, `CHUCKNORRIS_TELEGRAM_CHAT_ID`, `CHUCKNORRIS_CAVEMAN`, `CHUCKNORRIS_STACKED_PRS`. Per run: `--caveman <off|lite|full|ultra>` overrides the style; `--stacked-prs` / `--no-stacked-prs` force the PR workflow on/off.
 
 **Getting a Telegram bot token/chat id**: message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token. Then message your new bot once, and hit `https://api.telegram.org/bot<token>/getUpdates` in a browser — your chat id is in the response.
 
@@ -71,7 +73,8 @@ The wizard walks through:
 5. **Optional phases** — brainstorming, product brief, UX/UI design, implementation-readiness check. PRD, architecture, epics/stories, sprint planning, and the dev loop always run
 6. **Model mapping** — accept the defaults or override per role
 7. **Caveman output style** — per-run terseness (`off`/`lite`/`full`/`ultra`), defaulting to your global config. `--caveman <level>` skips this prompt
-8. **Retry limit and budget cap** — how many auto-retries per story before pausing, and an optional USD ceiling for the whole run
+8. **Stacked PRs** — per-run toggle for the numbered per-story branch/PR workflow, defaulting to your global config. `--stacked-prs` / `--no-stacked-prs` skips this prompt
+9. **Retry limit and budget cap** — how many auto-retries per story before pausing, and an optional USD ceiling for the whole run
 
 After the wizard, the run starts immediately and streams progress to the console (and your log file).
 
@@ -127,7 +130,7 @@ chucknorris run --target test/fixtures/sample-target --dry-run
 ## Command reference
 
 ```
-chucknorris run    [--target <path>] [--dry-run] [--all-haiku] [--caveman <off|lite|full|ultra>]
+chucknorris run    [--target <path>] [--dry-run] [--all-haiku] [--caveman <off|lite|full|ultra>] [--stacked-prs|--no-stacked-prs]
 chucknorris resume [--target <path>] [--dry-run]
 chucknorris status [--target <path>]
 chucknorris setup                                         # re-run first-time global config

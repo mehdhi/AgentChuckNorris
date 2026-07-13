@@ -23,6 +23,12 @@ export function renderTrackingBlock(story: StoryState, maxRetries: number): stri
     `- Status: ${story.status}`,
     `- Attempts: ${story.attempts}/${maxRetries + 1}`,
   ];
+  if (story.branch) {
+    lines.push(`- Branch: ${story.branch}${story.prBase ? ` (PR base: ${story.prBase})` : ''}`);
+  }
+  if (story.prUrl) {
+    lines.push(`- PR: ${story.prUrl}`);
+  }
   if (story.lastFailure) {
     lines.push(
       `- Last goal-check: FAIL — ${story.lastFailure.failedCriteria.join(', ') || 'unspecified criteria'}`,

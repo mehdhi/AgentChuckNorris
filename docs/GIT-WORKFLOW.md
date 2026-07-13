@@ -96,6 +96,32 @@ PR `[02]` shows only its own diff because its base is `feat/01-add-cache`, not `
   git push --force-with-lease
   ```
 
+## Autonomous mode — the ChuckNorris dev loop
+
+The orchestrator applies this same workflow **per story**, automatically, during `chucknorris run`.
+It's **on by default** (opt out with `--no-stacked-prs`, or set `"stackedPrs": false` in the global
+config / `CHUCKNORRIS_STACKED_PRS=false`).
+
+For each story in the sprint:
+
+1. Before any work lands, it cuts `feat/NN-<story-key>` from the **chain tip** (the previous
+   passed story's branch), or the repo default branch for the first one. `NN` is the run's monotonic
+   feature counter.
+2. The story file and its implementation land on that branch.
+3. When the story **passes goal verification**, it commits any residual changes, pushes, and opens
+   `[NN] <goal>` against the parent branch (`Stacked on: #<parentPR>`), or against the default branch
+   for the first story.
+4. The **chain tip only advances on a pass**, so a skipped/failed story never becomes the base of the
+   next one.
+
+Branch and PR for each story are recorded in that story's `## ChuckNorris Tracking` block and in
+`state.json`, so `chucknorris resume` picks the branch back up.
+
+Requirements & fallback: the target repo needs a **GitHub remote** and an **authenticated `gh` CLI**.
+If either is missing (e.g. a fresh local greenfield repo), the run logs a warning and proceeds
+**without** per-story PRs — nothing fails. `--dry-run` always disables it. The same merge-order and
+rebase-after-parent-merge rules above apply to the resulting stack.
+
 ## Notes
 
 - The legacy `dev` branch is superseded by per-feature branches; it is left in place, not deleted.

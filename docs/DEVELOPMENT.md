@@ -15,7 +15,7 @@ npm install
 
 ```bash
 npx tsc --noEmit     # typecheck (strict mode, no unchecked index access)
-npm test             # vitest run — 35 unit + e2e tests, no network, no API spend
+npm test             # vitest run — 55 unit + e2e tests, no network, no API spend
 npm run build        # tsc -> dist/
 npm run dev          # tsx src/index.ts <command>  (skip the build step while iterating)
 ```

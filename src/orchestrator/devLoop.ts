@@ -3,6 +3,8 @@ import { MAX_TURNS, REVIEW_DIGEST_MAX_CHARS } from '../config/defaults.js';
 import {
   markEpicRetrospected,
   patchStory,
+  reserveFeatureNumber,
+  setChainTip,
   setSprintStatusPath,
   upsertStory,
   type RunState,
@@ -10,7 +12,17 @@ import {
 } from '../state/types.js';
 import { extractLastJsonBlock } from '../util/json.js';
 import { findFile } from '../util/findFile.js';
-import { gitHead } from '../util/git.js';
+import {
+  commitsAhead,
+  gitCommitAll,
+  gitCreateBranch,
+  gitDefaultBranch,
+  gitHead,
+  gitPush,
+  gitSwitch,
+  hasUncommittedChanges,
+} from '../util/git.js';
+import { ghCreatePr } from '../util/github.js';
 import { runGoalCheck } from './goalChecker.js';
 import { NONINTERACTIVE_SUFFIX } from './phases.js';
 import {
@@ -89,6 +101,10 @@ function syncStories(state: RunState, entries: SprintStoryEntry[]): RunState {
         lastFailure: null,
         reviewDigest: null,
         operatorGuidance: null,
+        branch: null,
+        prBase: null,
+        prNumber: null,
+        prUrl: null,
       });
     }
   }
@@ -100,6 +116,7 @@ async function processStory(state: RunState, key: string, deps: OrchestratorDeps
   await deps.persist(state);
   await info(deps.logger, deps.notifier, `story ${key}`, 'starting');
 
+  state = await startStoryBranch(state, key, deps);
   state = await ensureStoryFile(state, key, deps);
   state = await ensureGoal(state, key, deps);
 
@@ -164,7 +181,14 @@ async function processStory(state: RunState, key: string, deps: OrchestratorDeps
       state = patchStory(state, key, { status: 'done', lastFailure: null, operatorGuidance: null });
       await syncTrackingBlock(state, key);
       await deps.persist(state);
-      await info(deps.logger, deps.notifier, `story ${key}`, `PASS after ${story().attempts} attempt(s) — ${verdict.summary}`);
+      state = await openStoryPr(state, key, deps);
+      const pr = state.devLoop.stories[key]!.prUrl;
+      await info(
+        deps.logger,
+        deps.notifier,
+        `story ${key}`,
+        `PASS after ${story().attempts} attempt(s) — ${verdict.summary}${pr ? ` — ${pr}` : ''}`,
+      );
       return state;
     }
 
@@ -215,6 +239,115 @@ function buildDevPrompt(state: RunState, story: StoryState): string {
   }
   parts.push(slashOrSkill(state, 'bmad-dev-story', `Implement story ${story.key} (${story.storyFile}).`));
   return parts.join('\n\n');
+}
+
+// ---------- stacked-PR-per-story workflow ----------
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+const slugify = (s: string): string =>
+  s.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'story';
+const featureNumberFromBranch = (branch: string): string => branch.match(/^feat\/(\d+)-/)?.[1] ?? '00';
+const truncate = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * Cut this story's numbered feature branch before any work lands, so the story
+ * file and its implementation both live on `feat/NN-<key>`. Base is the current
+ * chain tip (the previous passed story's branch), else the repo default branch.
+ * Any failure downgrades gracefully: the run continues, just without a PR.
+ */
+async function startStoryBranch(state: RunState, key: string, deps: OrchestratorDeps): Promise<RunState> {
+  if (!deps.stackedPrs) return state;
+  const cwd = state.targetRepo;
+  const story = state.devLoop.stories[key]!;
+
+  if (story.branch) {
+    // Resume: branch already created on a prior run — get back onto it.
+    try {
+      await gitSwitch(cwd, story.branch);
+    } catch (err) {
+      deps.logger.warn(`stacked-PR: could not switch to ${story.branch}: ${String(err)}`);
+    }
+    return state;
+  }
+
+  const base = state.devLoop.chainTipBranch ?? (await gitDefaultBranch(cwd));
+  const { state: reserved, seq } = reserveFeatureNumber(state);
+  const branch = `feat/${pad2(seq)}-${slugify(key)}`;
+  try {
+    await gitCreateBranch(cwd, branch, base);
+  } catch (err) {
+    deps.logger.warn(
+      `stacked-PR: failed to create ${branch} from ${base}: ${String(err)} — continuing without a PR for ${key}`,
+    );
+    return reserved; // number stays burned to keep NN monotonic
+  }
+  state = patchStory(reserved, key, { branch, prBase: base });
+  await deps.persist(state);
+  deps.logger.info(`stacked-PR: story ${key} on ${branch} (base ${base})`);
+  return state;
+}
+
+/**
+ * After a story passes: ensure its work is committed, push the branch, and open
+ * a stacked PR against its base (the parent story's branch, or the default
+ * branch). The chain tip only advances here — so a skipped/failed story never
+ * becomes the base of the next one. Push/PR failures are surfaced but never fail
+ * the story; the work is already committed locally.
+ */
+async function openStoryPr(state: RunState, key: string, deps: OrchestratorDeps): Promise<RunState> {
+  if (!deps.stackedPrs) return state;
+  const cwd = state.targetRepo;
+  const story = state.devLoop.stories[key]!;
+  if (!story.branch || story.prNumber) return state; // no branch, or PR already open
+
+  const base = story.prBase ?? (await gitDefaultBranch(cwd));
+  const nn = featureNumberFromBranch(story.branch);
+
+  if (await hasUncommittedChanges(cwd)) {
+    await gitCommitAll(cwd, `[${nn}] ${key}`);
+  }
+  if ((await commitsAhead(cwd, base)) === 0) {
+    deps.logger.warn(`stacked-PR: ${story.branch} has no commits vs ${base} — no PR for ${key}`);
+    return state;
+  }
+
+  try {
+    await gitPush(cwd, story.branch);
+  } catch (err) {
+    deps.logger.warn(`stacked-PR: push failed for ${story.branch}: ${String(err)}`);
+    await deps.notifier.send({
+      title: `story ${key}`,
+      body: `Work committed on ${story.branch}, but git push failed: ${String(err)}`,
+      priority: 'info',
+    });
+    return state;
+  }
+
+  const parentPr =
+    Object.values(state.devLoop.stories).find((s) => s.branch === story.prBase)?.prNumber ?? null;
+  const title = `[${nn}] ${story.goal ? truncate(story.goal, 60) : key}`;
+  const body =
+    `Automated implementation of story \`${key}\`.` +
+    (story.goal ? `\n\nGoal: ${story.goal}` : '') +
+    (parentPr ? `\n\nStacked on: #${parentPr}` : '');
+
+  const pr = await ghCreatePr(cwd, { base, head: story.branch, title, body });
+  if (!pr) {
+    deps.logger.warn(`stacked-PR: gh pr create failed for ${story.branch}`);
+    await deps.notifier.send({
+      title: `story ${key}`,
+      body: `Pushed ${story.branch} but PR creation failed — open it manually against ${base}.`,
+      priority: 'info',
+    });
+    return state;
+  }
+
+  state = patchStory(state, key, { prNumber: pr.number, prUrl: pr.url });
+  state = setChainTip(state, story.branch); // advance the chain only on a clean pass + PR
+  await syncTrackingBlock(state, key);
+  await deps.persist(state);
+  deps.logger.info(`stacked-PR: opened #${pr.number} ${pr.url}`);
+  return state;
 }
 
 async function ensureStoryFile(state: RunState, key: string, deps: OrchestratorDeps): Promise<RunState> {

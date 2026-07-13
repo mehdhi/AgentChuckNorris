@@ -50,6 +50,11 @@ export const StoryState = z.object({
   lastFailure: StoryFailure.nullable(),
   reviewDigest: z.string().nullable(),
   operatorGuidance: z.string().nullable(),
+  // Stacked-PR workflow (null when disabled/infeasible for the run).
+  branch: z.string().nullable().default(null),
+  prBase: z.string().nullable().default(null),
+  prNumber: z.number().int().nullable().default(null),
+  prUrl: z.string().nullable().default(null),
 });
 export type StoryState = z.infer<typeof StoryState>;
 
@@ -70,6 +75,8 @@ export const RunState = z.object({
   modelMap: ModelMap,
   /** Output style for this run's sessions. Defaulted so pre-caveman state files still load. */
   caveman: CavemanLevel.default('off'),
+  /** Open a numbered stacked PR per story. Defaulted so pre-feature state files still load. */
+  stackedPrs: z.boolean().default(true),
   maxRetries: z.number().int(),
   maxBudgetUsd: z.number().nullable(),
   steps: z.array(StepState),
@@ -77,6 +84,10 @@ export const RunState = z.object({
     sprintStatusPath: z.string().nullable(),
     stories: z.record(z.string(), StoryState),
     retrospectedEpics: z.array(z.number().int()),
+    /** Monotonic feature counter for feat/NN branch numbering. */
+    featureSeq: z.number().int().default(0),
+    /** Branch the next story's branch chains off (last story branch, else null → default branch). */
+    chainTipBranch: z.string().nullable().default(null),
   }),
   waiting: WaitingState.nullable(),
   telegramOffset: z.number().int(),
@@ -95,6 +106,7 @@ export function newRunState(init: {
   overallGoal: string;
   modelMap: ModelMap;
   caveman?: CavemanLevel;
+  stackedPrs?: boolean;
   maxRetries: number;
   maxBudgetUsd?: number | undefined;
   enabledSteps: StepId[];
@@ -108,13 +120,20 @@ export function newRunState(init: {
     overallGoal: init.overallGoal,
     modelMap: init.modelMap,
     caveman: init.caveman ?? 'off',
+    stackedPrs: init.stackedPrs ?? true,
     maxRetries: init.maxRetries,
     maxBudgetUsd: init.maxBudgetUsd ?? null,
     steps: STEP_IDS.map((id) => ({
       id,
       status: init.enabledSteps.includes(id) ? 'pending' : 'skipped',
     })),
-    devLoop: { sprintStatusPath: null, stories: {}, retrospectedEpics: [] },
+    devLoop: {
+      sprintStatusPath: null,
+      stories: {},
+      retrospectedEpics: [],
+      featureSeq: 0,
+      chainTipBranch: null,
+    },
     waiting: null,
     telegramOffset: 0,
     slashCommandsAvailable: null,
@@ -181,6 +200,18 @@ export function setTelegramOffset(state: RunState, offset: number): RunState {
 
 export function setSprintStatusPath(state: RunState, p: string): RunState {
   return { ...state, devLoop: { ...state.devLoop, sprintStatusPath: p } };
+}
+
+/** Reserve the next feat/NN number (increments at branch creation, pass or fail). */
+export function reserveFeatureNumber(state: RunState): { state: RunState; seq: number } {
+  const seq = state.devLoop.featureSeq + 1;
+  return { seq, state: { ...state, devLoop: { ...state.devLoop, featureSeq: seq } } };
+}
+
+/** Advance the chain tip to `branch` — only after a story passes and its PR opens,
+ * so later stories chain off the last *good* branch, never a skipped/partial one. */
+export function setChainTip(state: RunState, branch: string): RunState {
+  return { ...state, devLoop: { ...state.devLoop, chainTipBranch: branch } };
 }
 
 export function markEpicRetrospected(state: RunState, epic: number): RunState {

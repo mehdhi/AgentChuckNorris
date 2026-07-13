@@ -31,7 +31,7 @@ Every story is verified against its acceptance criteria by a separate, fail-clos
 ## Development
 
 ```bash
-npx tsc --noEmit && npm test   # 35 unit + e2e tests, no network, no API spend
+npx tsc --noEmit && npm test   # 55 unit + e2e tests, no network, no API spend
 ```
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the full layout and contributor notes.

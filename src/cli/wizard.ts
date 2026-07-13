@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import { bmadReady, detectBmad, type BmadInfo } from '../bmad/detect.js';
 import { runBmadInstaller } from '../bmad/install.js';
 import type { CavemanLevel } from '../config/caveman.js';
-import { DEFAULT_CAVEMAN, DEFAULT_MAX_RETRIES, DEFAULT_MODEL_MAP } from '../config/defaults.js';
+import { DEFAULT_CAVEMAN, DEFAULT_MAX_RETRIES, DEFAULT_MODEL_MAP, DEFAULT_STACKED_PRS } from '../config/defaults.js';
 import { saveGlobalConfig } from '../config/load.js';
 import type { GlobalConfig, ModelMap, ModelRole } from '../config/schema.js';
 import type { StepId } from '../state/types.js';
@@ -15,6 +15,7 @@ export interface WizardResult {
   overallGoal: string;
   modelMap: ModelMap;
   caveman: CavemanLevel;
+  stackedPrs: boolean;
   enabledSteps: StepId[];
   maxRetries: number;
   maxBudgetUsd: number | undefined;
@@ -57,6 +58,16 @@ export async function firstRunSetup(current: GlobalConfig): Promise<GlobalConfig
     initialValue: current.caveman ?? DEFAULT_CAVEMAN,
   });
   bail(caveman);
+
+  // -- stacked PRs -----------------------------------------------------
+  const stackedPrs = await p.confirm({
+    message:
+      'Stacked PRs: during the dev loop, put each story on its own numbered feat/NN branch and ' +
+      'open a chained PR for it? Needs a GitHub remote + authenticated gh CLI in the target repo ' +
+      '(auto-skips when missing). Recommended.',
+    initialValue: current.stackedPrs ?? DEFAULT_STACKED_PRS,
+  });
+  bail(stackedPrs);
 
   // -- notifications ---------------------------------------------------
   const ntfyTopic = await p.text({
@@ -107,6 +118,7 @@ export async function firstRunSetup(current: GlobalConfig): Promise<GlobalConfig
   const config: GlobalConfig = {
     ...current,
     caveman: caveman as CavemanLevel,
+    stackedPrs: Boolean(stackedPrs),
     ...(String(ntfyTopic).trim() ? { ntfyTopic: String(ntfyTopic).trim() } : { ntfyTopic: undefined }),
     ...(String(telegramBotToken).trim()
       ? { telegramBotToken: String(telegramBotToken).trim() }
@@ -215,6 +227,15 @@ export async function runWizard(global: GlobalConfig, targetFlag?: string): Prom
   });
   bail(caveman);
 
+  // -- stacked PRs ------------------------------------------------------
+  const stackedPrs = await p.confirm({
+    message:
+      'Open a numbered stacked PR per story during the dev loop? ' +
+      '(needs a GitHub remote + authenticated gh CLI; auto-skips if missing)',
+    initialValue: global.stackedPrs ?? DEFAULT_STACKED_PRS,
+  });
+  bail(stackedPrs);
+
   // -- limits -----------------------------------------------------------
   const retries = await p.text({
     message: 'Max auto-retries per story before pausing for you',
@@ -256,6 +277,7 @@ export async function runWizard(global: GlobalConfig, targetFlag?: string): Prom
     overallGoal: String(overallGoal),
     modelMap,
     caveman: caveman as CavemanLevel,
+    stackedPrs: Boolean(stackedPrs),
     enabledSteps,
     maxRetries: Number(retries || DEFAULT_MAX_RETRIES),
     maxBudgetUsd: budget === '' ? undefined : Number(budget),
